@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -8,19 +8,120 @@ import { Mail, Phone, MapPin, Send, Globe } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { GradientButton } from "@/components/ui/gradient-button";
 
+const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+const TURNSTILE_SCRIPT_SRC =
+  "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+
+type TurnstileOptions = {
+  sitekey: string;
+  theme?: "auto" | "light" | "dark";
+  size?: "normal" | "compact" | "flexible";
+  callback?: (token: string) => void;
+  "expired-callback"?: () => void;
+  "error-callback"?: () => void;
+};
+
+declare global {
+  interface Window {
+    turnstile?: {
+      render: (container: HTMLElement, options: TurnstileOptions) => string;
+      reset: (widgetId?: string) => void;
+      remove: (widgetId?: string) => void;
+    };
+  }
+}
+
 export function ContactForm() {
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
+  const [formStartedAt, setFormStartedAt] = useState(0);
+  const [turnstileToken, setTurnstileToken] = useState("");
+  const turnstileRef = useRef<HTMLDivElement>(null);
+  const turnstileWidgetId = useRef<string | null>(null);
   const [formData, setFormData] = useState({
     name: "",
     email: "",
     company: "",
     message: "",
+    website: "",
   });
+
+  useEffect(() => {
+    setFormStartedAt(Date.now());
+  }, []);
+
+  useEffect(() => {
+    if (!turnstileSiteKey) {
+      return;
+    }
+
+    const removeTurnstile = () => {
+      if (turnstileWidgetId.current && window.turnstile) {
+        window.turnstile.remove(turnstileWidgetId.current);
+        turnstileWidgetId.current = null;
+      }
+    };
+
+    const renderTurnstile = () => {
+      if (
+        !turnstileRef.current ||
+        !window.turnstile ||
+        turnstileWidgetId.current
+      ) {
+        return;
+      }
+
+      turnstileWidgetId.current = window.turnstile.render(turnstileRef.current, {
+        sitekey: turnstileSiteKey,
+        theme: "dark",
+        size: "flexible",
+        callback: (token) => setTurnstileToken(token),
+        "expired-callback": () => setTurnstileToken(""),
+        "error-callback": () => setTurnstileToken(""),
+      });
+    };
+
+    if (window.turnstile) {
+      renderTurnstile();
+      return removeTurnstile;
+    }
+
+    const existingScript = document.querySelector<HTMLScriptElement>(
+      `script[src="${TURNSTILE_SCRIPT_SRC}"]`,
+    );
+
+    if (existingScript) {
+      existingScript.addEventListener("load", renderTurnstile);
+
+      return () => {
+        existingScript.removeEventListener("load", renderTurnstile);
+        removeTurnstile();
+      };
+    }
+
+    const script = document.createElement("script");
+    script.src = TURNSTILE_SCRIPT_SRC;
+    script.async = true;
+    script.defer = true;
+    script.addEventListener("load", renderTurnstile);
+    document.head.appendChild(script);
+
+    return () => {
+      script.removeEventListener("load", renderTurnstile);
+      removeTurnstile();
+    };
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { id, value } = e.target;
     setFormData((prev) => ({ ...prev, [id]: value }));
+  };
+
+  const resetTurnstile = () => {
+    if (turnstileWidgetId.current && window.turnstile) {
+      window.turnstile.reset(turnstileWidgetId.current);
+      setTurnstileToken("");
+    }
   };
 
   const sanitizeInput = (text: string) => {
@@ -52,6 +153,15 @@ export function ContactForm() {
       return;
     }
 
+    if (turnstileSiteKey && !turnstileToken) {
+      toast({
+        variant: "destructive",
+        title: "Verification Required",
+        description: "Please complete the verification before sending.",
+      });
+      return;
+    }
+
     setSubmitting(true);
 
     const sanitizedName = sanitizeInput(formData.name);
@@ -70,6 +180,9 @@ export function ContactForm() {
           email: sanitizedEmail,
           company: sanitizedCompany,
           message: sanitizedMessage,
+          website: formData.website,
+          submittedAt: formStartedAt || Date.now(),
+          turnstileToken,
         }),
       });
       const result = (await response.json().catch(() => null)) as
@@ -92,7 +205,7 @@ export function ContactForm() {
         description:
           "Your message was submitted successfully. The Tektonics team will be in touch soon.",
       });
-      setFormData({ name: "", email: "", company: "", message: "" });
+      setFormData({ name: "", email: "", company: "", message: "", website: "" });
     } catch {
       toast({
         variant: "destructive",
@@ -100,6 +213,8 @@ export function ContactForm() {
         description: "Please try again or email info@tektonics.africa directly.",
       });
     } finally {
+      resetTurnstile();
+      setFormStartedAt(Date.now());
       setSubmitting(false);
     }
   };
@@ -162,6 +277,18 @@ export function ContactForm() {
             <div className="absolute bottom-0 left-0 w-64 h-64 bg-accent/10 blur-[80px] rounded-full translate-y-1/4 -translate-x-1/4 pointer-events-none" />
             
             <form onSubmit={handleSubmit} className="space-y-6 relative z-10">
+              <div className="absolute -left-[10000px] top-auto h-px w-px overflow-hidden" aria-hidden="true">
+                <Label htmlFor="website">Website</Label>
+                <Input
+                  id="website"
+                  name="website"
+                  tabIndex={-1}
+                  autoComplete="off"
+                  value={formData.website}
+                  onChange={handleChange}
+                />
+              </div>
+
               <div className="grid md:grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <Label htmlFor="name" className="text-white/80 font-headline">Full Name</Label>
@@ -210,6 +337,12 @@ export function ContactForm() {
                   className="bg-white/5 border-white/10 text-white focus:border-accent min-h-[120px] font-body hover:bg-white/10 transition-colors" 
                 />
               </div>
+
+              {turnstileSiteKey ? (
+                <div className="flex justify-center">
+                  <div ref={turnstileRef} className="w-full" />
+                </div>
+              ) : null}
 
               <GradientButton type="submit" disabled={submitting} className="w-full mt-4">
                 {submitting ? "Sending..." : "Send Email"}
