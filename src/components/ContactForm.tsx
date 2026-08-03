@@ -8,12 +8,15 @@ import { Mail, Phone, MapPin, Send, Globe } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { GradientButton } from "@/components/ui/gradient-button";
 
-const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+const TURNSTILE_SITE_KEY =
+  process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "0x4AAAAAAEFP24TWJG3QirWV";
+const TURNSTILE_ACTION = "turnstile-spin-v2";
 const TURNSTILE_SCRIPT_SRC =
   "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
 
 type TurnstileOptions = {
   sitekey: string;
+  action?: string;
   theme?: "auto" | "light" | "dark";
   size?: "normal" | "compact" | "flexible";
   callback?: (token: string) => void;
@@ -51,10 +54,6 @@ export function ContactForm() {
   }, []);
 
   useEffect(() => {
-    if (!turnstileSiteKey) {
-      return;
-    }
-
     const removeTurnstile = () => {
       if (turnstileWidgetId.current && window.turnstile) {
         window.turnstile.remove(turnstileWidgetId.current);
@@ -72,7 +71,8 @@ export function ContactForm() {
       }
 
       turnstileWidgetId.current = window.turnstile.render(turnstileRef.current, {
-        sitekey: turnstileSiteKey,
+        sitekey: TURNSTILE_SITE_KEY,
+        action: TURNSTILE_ACTION,
         theme: "dark",
         size: "flexible",
         callback: (token) => setTurnstileToken(token),
@@ -153,7 +153,7 @@ export function ContactForm() {
       return;
     }
 
-    if (turnstileSiteKey && !turnstileToken) {
+    if (!turnstileToken) {
       toast({
         variant: "destructive",
         title: "Verification Required",
@@ -182,7 +182,7 @@ export function ContactForm() {
           message: sanitizedMessage,
           website: formData.website,
           submittedAt: formStartedAt || Date.now(),
-          turnstileToken,
+          "cf-turnstile-response": turnstileToken,
         }),
       });
       const result = (await response.json().catch(() => null)) as
@@ -338,11 +338,14 @@ export function ContactForm() {
                 />
               </div>
 
-              {turnstileSiteKey ? (
-                <div className="flex justify-center">
-                  <div ref={turnstileRef} className="w-full" />
-                </div>
-              ) : null}
+              <div className="flex justify-center">
+                <div
+                  ref={turnstileRef}
+                  className="cf-turnstile w-full"
+                  data-sitekey={TURNSTILE_SITE_KEY}
+                  data-action={TURNSTILE_ACTION}
+                />
+              </div>
 
               <GradientButton type="submit" disabled={submitting} className="w-full mt-4">
                 {submitting ? "Sending..." : "Send Email"}

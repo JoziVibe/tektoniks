@@ -32,7 +32,7 @@ const contactSchema = z.object({
   message: z.string().trim().min(1).max(4000),
   website: z.string().trim().max(200).optional().default(""),
   submittedAt: z.number().int().positive().optional(),
-  turnstileToken: z.string().trim().max(2048).optional().default(""),
+  "cf-turnstile-response": z.string().trim().max(2048).optional().default(""),
 });
 
 const forbiddenPattern =
@@ -118,11 +118,11 @@ const getPacingError = (submittedAt?: number) => {
 };
 
 const verifyTurnstileToken = async (token: string, remoteIp: string) => {
-  const secret = process.env.TURNSTILE_SECRET_KEY;
-  const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+  const secret = process.env.TURNSTILE_SECRET;
 
-  if (!secret || !siteKey) {
-    return true;
+  if (!secret) {
+    console.error("Turnstile is not configured. TURNSTILE_SECRET is required.");
+    return false;
   }
 
   if (!token || token.length > 2048) {
@@ -133,11 +133,8 @@ const verifyTurnstileToken = async (token: string, remoteIp: string) => {
     const body = new URLSearchParams({
       secret,
       response: token,
+      remoteip: remoteIp,
     });
-
-    if (remoteIp !== "unknown") {
-      body.set("remoteip", remoteIp);
-    }
 
     const response = await fetch(TURNSTILE_SITEVERIFY_URL, {
       method: "POST",
@@ -233,14 +230,14 @@ export async function POST(request: Request) {
   }
 
   const turnstilePassed = await verifyTurnstileToken(
-    parsed.data.turnstileToken,
+    parsed.data["cf-turnstile-response"],
     clientIp,
   );
 
   if (!turnstilePassed) {
     return NextResponse.json(
       { error: "Verification failed. Please try again." },
-      { status: 400 },
+      { status: 403 },
     );
   }
 
